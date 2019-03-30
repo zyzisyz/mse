@@ -11,9 +11,8 @@ from scipy import stats
 
 
 # 打乱数据集
-def Data_feed(dic, check, batch_size=500, path='./dic.npz'):
-    #dic = np.load(path)['dic'].item()
-    #check = np.load(path)['check']
+def Data_feed(dic, check, batch_size=500):
+
     index = [i for i in range(len(check))]
     random.shuffle(index)
     check = check[index]
@@ -59,13 +58,12 @@ def shuffle_data(data):
     data = data[index]
     return data
 
-# 我自己封装的MPL单层函数
-# 论文中的example是用单层的MPL，激活函数采用tanh，我不知道这里用其他是否有影响
-
 
 def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, istrain=True):
-
-    # 这个init采用高斯是否合理？
+    '''
+    # 我自己封装的MPL单层函数
+    # 论文中的example是用单层的MPL，激活函数采用tanh，我不知道这里用其他是否有影响
+    '''
     w_init = tf.contrib.layers.variance_scaling_initializer()
     b_init = tf.constant_initializer(0.)
 
@@ -78,8 +76,6 @@ def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, i
 
     output = tf.matmul(input, w) + b
 
-    # 这个激活函数是我在网络上查的
-    # 注意这里的激活函数
     if acitvate == 'tanh':
         output = tf.nn.tanh(output)
     elif acitvate == 'sigmoid':
@@ -116,15 +112,19 @@ class VAE(object):
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
 
-        # load mnist
+        # load data
         self.dataset_path = dataset_path
-        self.input_data, self.input_label = loader(dataset_path)
+        self.input_data, self.input_utt = loader(dataset_path)
+
+        '''input_data | spk_list'''
+        # vector 对应的说话人 int label
+        self.spk_list = np.load(
+            '/data/voxceleb_combined_200000/spk.npz')['spk']
+        # 所有说话人 int label
+        self.spker = np.load('/data/voxceleb_combined_200000/spk.npz')['check']
 
         self.epoch = epoch
         self.batch_size = batch_size
-
-        self.dic = np.load('./dic.npz')['dic'].item()
-        self.check = np.load('./dic.npz')['check']
 
         # get number of batches for a single epoch
         # //表示向下取整
@@ -142,6 +142,10 @@ class VAE(object):
         # train
         self.learning_rate = learning_rate
         self.beta1 = beta1
+
+        self.zero = []
+        for i in range(len(self.z_dim)):
+            self.zero.append(0)
 
     # Gaussian MLP Encoder
     def MPL_encoder(self, x, n_hidden, n_output, keep_prob):
@@ -192,16 +196,19 @@ class VAE(object):
             y = tf.matmul(net, wo) + bo
         return y
 
-    def update_table(mean, spk):
-        pass
+    def update_table(self, mean, spk):
+        num_spker = len(self.spker)
+        count = [0 for _ in range(num_spker)]
+
+        spk_z_table = []
+        for i in range(num_spker):
+            temp = self.zero
+            spk_z_dict.update(temp)
+        
 
     def train(self):
-        self.build_model()
-
-        # some parameters
-        """ Graph Input """
-
-##################################################################################
+        #######################################################################
+        '''网络结构'''
         #  输入inputs的feed
         self.inputs = tf.placeholder(
             tf.float32, [None, self.dnn_input_dim], name='input_vector')
@@ -217,7 +224,7 @@ class VAE(object):
         # decoding
         self.out = self.MLP_decoder(
             z, self.n_hidden, self.dnn_output_dim, self.keep_prob)
-##################################################################################
+        #######################################################################
 
         # initialize all variables
         tf.global_variables_initializer().run()
@@ -244,18 +251,14 @@ class VAE(object):
 
         # loop for epoch
         for epoch in range(start_epoch, self.epoch):
-
             mean = self.sess.run(self.mu, feed_dict={
                                  self.inputs: self.input_data})
-
             table = self.update_table(mean, check)
-
             self.input_data = shuffle_data(self.input_data)
-            # get batch data
 
+            # get batch data
             for idx in range(start_batch_id, self.num_batches):
 
-                #
                 batch_images = self.input_data[idx *
                                                self.batch_size:(idx+1)*self.batch_size]
                 # batch_z = gaussian(self.batch_size, self.z_dim)
