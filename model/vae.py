@@ -1,0 +1,369 @@
+# -*- coding: utf-8 -*-
+from __future__ import division
+from __future__ import print_function
+import os
+import time
+import tensorflow as tf
+import numpy as np
+import random
+from model.model_utils import *
+from scipy import stats
+
+
+# 打乱数据集
+def Data_feed(dic, check, batch_size=500, path='./dic.npz'):
+    #dic = np.load(path)['dic'].item()
+    #check = np.load(path)['check']
+    index = [i for i in range(len(check))]
+    random.shuffle(index)
+    check = check[index]
+    label = []
+    embeddings = []
+    count = 0
+    for i in check:
+        if count >= batch_size-1:
+            break
+        else:
+            i_vector = np.array(dic[i])
+
+            index = [j for j in range(len(i_vector))]
+            random.shuffle(index)
+
+            i_vector = i_vector[index]
+
+            count_pos = 0  # sample not more than 5 pos
+
+            for j in i_vector:
+                if count_pos >= 5:
+                    break
+                else:
+                    count_pos += 1
+                    count += 1
+                    label.append(i)
+                    embeddings.append(j)
+    label = np.array(label).reshape(-1, 1)
+    return embeddings, label
+
+
+def shuffle_set(data, label):
+    index = [i for i in range(len(data))]
+    random.shuffle(index)
+    data = data[index]
+    label = label[index]
+    return data, label
+
+
+def shuffle_data(data):
+    index = [i for i in range(len(data))]
+    random.shuffle(index)
+    data = data[index]
+    return data
+
+# 我自己封装的MPL单层函数
+# 论文中的example是用单层的MPL，激活函数采用tanh，我不知道这里用其他是否有影响
+
+
+def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, istrain=True):
+
+    # 这个init采用高斯是否合理？
+    w_init = tf.contrib.layers.variance_scaling_initializer()
+    b_init = tf.constant_initializer(0.)
+
+    w_str = 'w'+str(id)
+    b_str = 'b'+str(id)
+
+    w = tf.get_variable(
+        w_str, [input.get_shape()[1], n_hidden], initializer=w_init)
+    b = tf.get_variable(b_str, [n_hidden], initializer=b_init)
+
+    output = tf.matmul(input, w) + b
+
+    # 这个激活函数是我在网络上查的
+    # 注意这里的激活函数
+    if acitvate == 'tanh':
+        output = tf.nn.tanh(output)
+    elif acitvate == 'sigmoid':
+        output = tf.nn.sigmoid(output)
+    else:
+        output = tf.nn.elu(output)
+    return output
+
+
+def loader(path="./data/test_vector.npz"):
+    return np.load(path)['vector'], np.load(path)['label']
+
+
+class VAE(object):
+    model_name = "VAE"     # name for checkpoint
+
+    def __init__(self,
+                 sess,
+                 epoch=20,
+                 batch_size=64,
+                 z_dim=512,
+                 n_hidden=1024,
+                 dataset_path='./data/d_train.npz',
+                 checkpoint_dir='./experiments/baseline/checkpoint',
+                 log_dir='./experiments/baseline/log',
+                 keep_prob=1,
+                 beta1=0.5,
+                 learning_rate=0.00005,
+                 b=0.04
+                 ):
+
+        self.sess = sess
+        self.b = b
+        self.checkpoint_dir = checkpoint_dir
+        self.log_dir = log_dir
+
+        # load mnist
+        self.dataset_path = dataset_path
+        self.input_data, self.input_label = loader(dataset_path)
+
+        self.epoch = epoch
+        self.batch_size = batch_size
+
+        self.dic = np.load('./dic.npz')['dic'].item()
+        self.check = np.load('./dic.npz')['check']
+
+        # get number of batches for a single epoch
+        # //表示向下取整
+        self.num_batches = len(self.input_data) // self.batch_size
+
+        self.z_dim = z_dim
+        self.keep_prob = keep_prob
+        self.n_hidden = n_hidden  # MLP的隐含层维度
+
+        self.dnn_input_dim = 512  # 输入的维度为512
+        self.dnn_output_dim = 512   # 恢复的也是512
+
+        self.z_dim = z_dim         # dimension of v-vector
+
+        # train
+        self.learning_rate = learning_rate
+        self.beta1 = beta1
+
+    # Gaussian MLP Encoder
+    def MPL_encoder(self, x, n_hidden, n_output, keep_prob):
+        with tf.variable_scope("gaussian_MLP_encoder"):
+
+            # initializers
+            # 这里是我瞎改的初始化值
+            w_init = tf.contrib.layers.variance_scaling_initializer()
+            b_init = tf.constant_initializer(0.)
+
+            # layer-0
+            net = MLP_net(input=x, id=0, n_hidden=n_hidden, acitvate='sigmoid',
+                          keep_prob=keep_prob)
+            # layer-1
+            net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='tanh',
+                          keep_prob=keep_prob)
+
+            # 注意这里n_output乘2
+            wo = tf.get_variable(
+                'wo', [net.get_shape()[1], n_output], initializer=w_init)
+            bo = tf.get_variable('bo', [n_output], initializer=b_init)
+
+            gaussian_params = tf.matmul(net, wo) + bo
+            mean = gaussian_params
+
+            stddev = tf.constant(
+                self.k, shape=[n_output], dtype=tf.float32)
+            stddev = self.sess.run(stddev)
+
+        return mean, stddev
+
+    # Bernoulli decoder
+    def MLP_decoder(self, z, n_hidden, n_output, keep_prob):
+        with tf.variable_scope("bernoulli_MLP_decoder"):
+            # initializers
+            w_init = tf.contrib.layers.variance_scaling_initializer()
+            b_init = tf.constant_initializer(0.)
+            # layer-0
+            net = MLP_net(input=z, id=0, n_hidden=n_hidden, acitvate="tanh",
+                          keep_prob=keep_prob)
+            # layer-1
+            net = MLP_net(input=net, id=3, n_hidden=n_hidden, acitvate='sigmoid',
+                          keep_prob=keep_prob)
+            # output layer-mean
+            wo = tf.get_variable(
+                'wo', [net.get_shape()[1], n_output], initializer=w_init)
+            bo = tf.get_variable('bo', [n_output], initializer=b_init)
+            y = tf.matmul(net, wo) + bo
+        return y
+
+    def update_table(mean, spk):
+        pass
+
+    def train(self):
+        self.build_model()
+
+        # some parameters
+        """ Graph Input """
+
+##################################################################################
+        #  输入inputs的feed
+        self.inputs = tf.placeholder(
+            tf.float32, [None, self.dnn_input_dim], name='input_vector')
+
+        # encoding
+        self.mu, self.sigma = self.MPL_encoder(
+            self.inputs, self.n_hidden, self.z_dim, self.keep_prob)
+
+        # sampling by re-parameterization technique
+        z = self.mu + self.sigma * \
+            tf.random_normal(tf.shape(self.mu), 0, 1, dtype=tf.float32)
+
+        # decoding
+        self.out = self.MLP_decoder(
+            z, self.n_hidden, self.dnn_output_dim, self.keep_prob)
+##################################################################################
+
+        # initialize all variables
+        tf.global_variables_initializer().run()
+
+        # saver to save model
+        self.saver = tf.train.Saver()
+
+        # summary writer
+        self.writer = tf.summary.FileWriter(
+            self.log_dir + '/' + self.model_name, self.sess.graph)
+
+        # restore check-point if it exits
+        could_load, checkpoint_counter = self.load_ckp(self.checkpoint_dir)
+        if could_load:
+            start_epoch = (int)(checkpoint_counter / self.num_batches)
+            start_batch_id = checkpoint_counter - start_epoch * self.num_batches
+            counter = checkpoint_counter
+            print(" [*] Load SUCCESS")
+        else:
+            start_epoch = 0
+            start_batch_id = 0
+            counter = 1
+            print(" [!] Load failed...")
+
+        # loop for epoch
+        for epoch in range(start_epoch, self.epoch):
+
+            mean = self.sess.run(self.mu, feed_dict={
+                                 self.inputs: self.input_data})
+
+            table = self.update_table(mean, check)
+
+            self.input_data = shuffle_data(self.input_data)
+            # get batch data
+
+            for idx in range(start_batch_id, self.num_batches):
+
+                #
+                batch_images = self.input_data[idx *
+                                               self.batch_size:(idx+1)*self.batch_size]
+                # batch_z = gaussian(self.batch_size, self.z_dim)
+
+                self.loss = self.mse + self.KL_divergence
+                # self.loss = self.KL_divergence
+
+                # KL散度
+                re_mse = 2*(1-self.b) * \
+                    tf.reduce_sum(tf.square(self.inputs-self.out), 1)
+                KL_divergence = self.b*0.5 * tf.reduce_sum(tf.square(self.mu) + tf.square(
+                    self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
+
+                self.mse = tf.reduce_mean(re_mse)
+                self.KL_divergence = tf.reduce_mean(KL_divergence)
+
+                """ Summary """
+                mse = tf.summary.scalar("mse", self.mse)
+                kl_sum = tf.summary.scalar("kl", self.KL_divergence)
+                loss_sum = tf.summary.scalar("loss", self.loss)
+
+                # final summary operations
+                self.merged_summary_op = tf.summary.merge_all()
+
+                """ Training """
+                t_vars = tf.trainable_variables()
+                with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+                    self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                        .minimize(self.loss, var_list=t_vars)
+
+                # update autoencoder
+                _, summary_str, loss, mse, kl_loss = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence],
+                                                                   feed_dict={self.inputs: batch_images})
+                self.writer.add_summary(summary_str, counter)
+
+                # display training status
+                counter += 1
+                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, mse: %.8f, kl: %.8f, "
+                      % (epoch, idx, self.num_batches, loss, mse, kl_loss))
+
+            # After an epoch, start_batch_id is set to zero
+            # non-zero value is only for the first epoch after loading pre-trained model
+            start_batch_id = 0
+
+            # save model
+            self.save_ckp(self.checkpoint_dir, counter)
+
+        # save model for final step
+        self.save_ckp(self.checkpoint_dir, counter)
+
+    def predict(self, input_vector):
+
+        # initialize all variables
+        tf.global_variables_initializer().run()
+
+        self.saver = tf.train.Saver()
+
+        # summary writer
+        self.writer = tf.summary.FileWriter(
+            self.log_dir + '/' + self.model_name, self.sess.graph)
+
+        # restore check-point if it exits
+
+        could_load, checkpoint_counter = self.load_ckp(self.checkpoint_dir)
+        if could_load:
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
+
+        predict_mu, predict_sigma = self.sess.run([self.mu, self.sigma],
+                                                  feed_dict={self.inputs: input_vector})
+
+        return predict_mu
+
+    def visualize_results(self, epoch):
+        pass
+
+    @property
+    def model_dir(self):
+        return "{}_{}_{}_{}".format(
+            self.model_name, self.dataset_path,
+            self.batch_size, self.z_dim)
+
+    def save_ckp(self, checkpoint_dir, step):
+        checkpoint_dir = os.path.join(
+            checkpoint_dir, self.model_dir, self.model_name)
+
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+
+        self.saver.save(self.sess, os.path.join(
+            checkpoint_dir, self.model_name+'.model'), global_step=step)
+
+    def load_ckp(self, checkpoint_dir):
+        import re
+        print(" [*] Reading checkpoints...")
+        checkpoint_dir = os.path.join(
+            checkpoint_dir, self.model_dir, self.model_name)
+
+        ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            self.saver.restore(self.sess, os.path.join(
+                checkpoint_dir, ckpt_name))
+            counter = int(
+                next(re.finditer("(\d+)(?!.*\d)", ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
