@@ -142,8 +142,7 @@ class VAE(object):
             # layer-1
             net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='tanh',
                           keep_prob=keep_prob)
-
-            # 注意这里n_output乘2
+                          
             wo = tf.get_variable(
                 'wo', [net.get_shape()[1], n_output], initializer=w_init)
             bo = tf.get_variable('bo', [n_output], initializer=b_init)
