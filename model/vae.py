@@ -142,7 +142,7 @@ class VAE(object):
             # layer-1
             net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='tanh',
                           keep_prob=keep_prob)
-                          
+
             wo = tf.get_variable(
                 'wo', [net.get_shape()[1], n_output], initializer=w_init)
             bo = tf.get_variable('bo', [n_output], initializer=b_init)
@@ -241,8 +241,6 @@ class VAE(object):
         '''total loss'''
         self.loss = self.re_mse+self.KL_divergence+self.mse2
 
-    
-
         """ Summary """
         re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
         mse2_sum = tf.summary.scalar("mse2", self.mse2)
@@ -285,11 +283,11 @@ class VAE(object):
                 self.inputs: self.input_data})
             table = self.update_table(mean)
 
-            self.input_data, table = shuffle_data(self.input_data, table)
+            input_data, table = shuffle_data(self.input_data, table)
             
             for idx in range(start_batch_id, self.num_batches):
                 # get batch data
-                batch_input_data = self.input_data[idx *
+                batch_input_data = input_data[idx *
                                                    self.batch_size:(idx+1)*self.batch_size]
                 batch_input_table = table[idx *
                                           self.batch_size:(idx+1)*self.batch_size]
@@ -304,7 +302,6 @@ class VAE(object):
             
 
                 # update autoencoder
-                
                 _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.re_mse, self.KL_divergence, self.mse2],
                                                                             feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
                 
