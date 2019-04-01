@@ -10,41 +10,6 @@ from model.model_utils import *
 from scipy import stats
 
 
-# 打乱数据集
-'''
-def Data_feed(dic, check, batch_size=500):
-    index = [i for i in range(len(check))]
-    random.shuffle(index)
-    check = check[index]
-    label = []
-    embeddings = []
-    count = 0
-    for i in check:
-        if count >= batch_size-1:
-            break
-        else:
-            i_vector = np.array(dic[i])
-
-            index = [j for j in range(len(i_vector))]
-            random.shuffle(index)
-
-            i_vector = i_vector[index]
-
-            count_pos = 0  # sample not more than 5 pos
-
-            for j in i_vector:
-                if count_pos >= 5:
-                    break
-                else:
-                    count_pos += 1
-                    count += 1
-                    label.append(i)
-                    embeddings.append(j)
-    label = np.array(label).reshape(-1, 1)
-    return embeddings, label
-'''
-
-
 def shuffle_set(data, label):
     index = [i for i in range(len(data))]
     random.shuffle(index)
