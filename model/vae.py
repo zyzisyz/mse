@@ -293,9 +293,9 @@ class VAE(object):
                                           self.batch_size:(idx+1)*self.batch_size]
 
                 """ Training """
-                #t_vars = tf.trainable_variables()
+                # t_vars = tf.trainable_variables()
                 with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                    #self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                    # self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
                     #        .minimize(self.loss, var_list=t_vars)
                     self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
                             .minimize(self.loss)
