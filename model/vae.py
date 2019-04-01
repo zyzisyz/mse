@@ -44,6 +44,7 @@ def Data_feed(dic, check, batch_size=500):
     return embeddings, label
 '''
 
+
 def shuffle_set(data, label):
     index = [i for i in range(len(data))]
     random.shuffle(index)
@@ -52,11 +53,12 @@ def shuffle_set(data, label):
     return data, label
 
 
-def shuffle_data(data):
+def shuffle_data(data, table):
     index = [i for i in range(len(data))]
     random.shuffle(index)
     data = data[index]
-    return data
+    table = table[index]
+    return data, table
 
 
 def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, istrain=True):
@@ -105,9 +107,10 @@ class VAE(object):
                  beta1=0.5,
                  learning_rate=0.00005,
                  b=0.04,
-                 mse2_start_e=20
+                 mse2_start_e=20,
+                 k=0.1
                  ):
-
+        self.k = k
         self.sess = sess
         self.b = b
         self.checkpoint_dir = checkpoint_dir
@@ -121,14 +124,23 @@ class VAE(object):
         '''input_data | spk_list'''
         # vector 对应的说话人 int label
         self.spk_list = np.load(
-            '/data/voxceleb_combined_200000/spk.npz')['spk']
+            './data/voxceleb_combined_200000/spk.npz')['spk']
         # 所有说话人 int label
-        self.spker = np.load('/data/voxceleb_combined_200000/spk.npz')['check']
+        self.spker = np.load(
+            './data/voxceleb_combined_200000/spk.npz')['check']
 
-        ''' 计算spker人数 '''
-        self.spk_count = [0 for _ in range(len(self.spker))]
+        '''
+        计算spker人数
+        self.spk_count_shape = (spk_num, z_dim)
+        '''
+        spk_count = [0 for _ in range(len(self.spker))]
         for i in self.spker:
-            self.spk_count[int(i)] += 1
+            spk_count[int(i)] += 1
+
+        self.spk_count = []
+        for i in range(len(spk_count)):
+            temp = [spk_count[i] for _ in range(z_dim)]
+            self.spk_count.append(temp)
 
         self.epoch = epoch
         self.batch_size = batch_size
@@ -149,10 +161,6 @@ class VAE(object):
         # train
         self.learning_rate = learning_rate
         self.beta1 = beta1
-
-        self.zero = []
-        for i in range(len(self.z_dim)):
-            self.zero.append(0)
 
     # Gaussian MLP Encoder
     def MPL_encoder(self, x, n_hidden, n_output, keep_prob):
@@ -218,15 +226,16 @@ class VAE(object):
 
         '''加上mean值'''
         for i in range(mean.shape[0]):
-            spk_table[spk_list[i]] += mean[i]
+            spk_table[self.spk_list[i]] += mean[i]
 
         '''计算mean的平均值'''
+
         spk_table = spk_table/counter
 
         '''算mse2的utt table'''
         utt_table = np.zeros(shape=mean.shape, dtype=np.float32)
-        for i in range(len(utt_table.shape[0])):
-            utt_table[i] += spk_table[spk_list[i]]
+        for i in range(utt_table.shape[0]):
+            utt_table[i] += spk_table[self.spk_list[i]][0]
 
         return utt_table
 
@@ -251,6 +260,33 @@ class VAE(object):
         self.out = self.MLP_decoder(
             z, self.n_hidden, self.dnn_output_dim, self.keep_prob)
         #######################################################################
+
+        '''reconstruct mse'''
+        re_mse = tf.reduce_sum(tf.square(self.inputs-self.out), 1)
+        self.re_mse = 2*(1-self.b)*tf.reduce_mean(re_mse)
+
+        '''KL散度'''
+        KL_divergence = tf.reduce_sum(tf.square(self.mu) + tf.square(
+            self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
+        self.KL_divergence = self.b*0.5*tf.reduce_mean(KL_divergence)
+
+        mse2 = tf.reduce_sum(
+            tf.square(self.mu-self.mean_table), 1)
+        self.mse2 = tf.reduce_mean(mse2)
+
+        '''total loss'''
+        self.loss_1 = self.re_mse+self.KL_divergence+self.mse2
+
+        self.loss_2 = self.re_mse+self.KL_divergence
+
+        """ Summary """
+        re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
+        mse2_sum = tf.summary.scalar("mse2", self.mse2)
+        kl_sum = tf.summary.scalar("kl", self.KL_divergence)
+        loss_sum = tf.summary.scalar("loss", self.loss_1)
+
+        # final summary operations
+        self.merged_summary_op = tf.summary.merge_all()
 
     def train(self):
 
@@ -282,11 +318,10 @@ class VAE(object):
         # loop for epoch
         for epoch in range(start_epoch, self.epoch):
             mean = self.sess.run(self.mu, feed_dict={
-                                 self.inputs: self.input_data})
+                self.inputs: self.input_data})
             table = self.update_table(mean)
 
-            self.input_data = shuffle_data(self.input_data)
-
+            self.input_data, table = shuffle_data(self.input_data, table)
             # get batch data
             for idx in range(start_batch_id, self.num_batches):
 
@@ -295,50 +330,30 @@ class VAE(object):
                 batch_input_table = table[idx *
                                           self.batch_size:(idx+1)*self.batch_size]
 
-                '''reconstruct mse'''
-                re_mse = tf.reduce_sum(tf.square(self.inputs-self.out), 1)
-                self.re_mse = 2*(1-self.b)*tf.reduce_mean(re_mse)
-
-                '''KL散度'''
-                KL_divergence = tf.reduce_sum(tf.square(self.mu) + tf.square(
-                    self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
-                self.KL_divergence = self.b*0.5*tf.reduce_mean(KL_divergence)
-
-                '''mse2'''
-                if epoch < self.mse2_start_e:
-                    self.mse2 = 0
-                else:
-                    mese2 = tf.reduce_sum(
-                        tf.square(self.mu-self.mean_table), 1)
-                    self.mse2 = tf.reduce_mean(mse2)
-
-                '''total loss'''
-                self.loss = self.re_mse+self.KL_divergence+self.mse2
-
-                """ Summary """
-                re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
-                mse2_sum = tf.summary.scalar("mse2", self.rmse2)
-                kl_sum = tf.summary.scalar("kl", self.KL_divergence)
-                loss_sum = tf.summary.scalar("loss", self.loss)
-
-                # final summary operations
-                self.merged_summary_op = tf.summary.merge_all()
-
                 """ Training """
                 t_vars = tf.trainable_variables()
                 with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                    self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                        .minimize(self.loss, var_list=t_vars)
+                    if int(epoch) > self.mse2_start_e:
+                        self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                            .minimize(self.loss_1, var_list=t_vars)
+                    else:
+                        self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                            .minimize(self.loss_2, var_list=t_vars)
 
                 # update autoencoder
-                _, summary_str, loss, mse, kl_loss = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence],
-                                                                   feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
+                if int(epoch) > self.mse2_start_e:
+                    _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss_1, self.re_mse, self.KL_divergence, self.mse2],
+                                                                            feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
+                
+                else:
+                    _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss_2, self.re_mse, self.KL_divergence, self.mse2],
+                                                                            feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
                 counter += 1
-                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, mse: %.8f, kl: %.8f, "
-                      % (epoch, idx, self.num_batches, loss, mse, kl_loss))
+                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, re_mse: %.8f, kl: %.8f, mse2: %.8f,"
+                      % (epoch, idx, self.num_batches, loss, remse, kl_loss, mse_2))
 
             # After an epoch, start_batch_id is set to zero
             # non-zero value is only for the first epoch after loading pre-trained model

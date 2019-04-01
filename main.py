@@ -12,6 +12,8 @@ tf.app.flags.DEFINE_integer('n_hidden', 1024, 'dim of hidden')
 
 tf.app.flags.DEFINE_integer('z_dim', 512, 'dim of z')
 
+tf.app.flags.DEFINE_integer('mse2_start_e', 20, 'mse2 start epoch')
+
 tf.app.flags.DEFINE_float('keep_prob', 0.9, 'dropout keep_prob')
 
 tf.app.flags.DEFINE_float('learn_rate', 0.00001, 'learn rate')
@@ -29,7 +31,7 @@ tf.app.flags.DEFINE_string('dataset_path', './data/d.npz',
 params = tf.app.flags.FLAGS
 
 
-experiment_dir = '/experiments/'+'z'+str(params.z_dim)+'_h' + str(params.n_hidden)
+experiment_dir = '/experiments/'+'z'+str(params.z_dim)+'_h' + str(params.n_hidden)+'_mse'+str(params.mse2_start_e)
 
 experiment_dir = os.path.dirname(os.path.abspath(__file__))+experiment_dir
 
@@ -52,6 +54,7 @@ with tf.Session() as sess:
         keep_prob=params.keep_prob,
         learning_rate=params.learn_rate,
         b=params.b,
+        mse2_start_e=params.mse2_start_e,
     )
     print('model/checkpoint/logs will save in {}.'.format(experiment_dir))
 
