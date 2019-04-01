@@ -275,15 +275,15 @@ class VAE(object):
         self.mse2 = tf.reduce_mean(mse2)
 
         '''total loss'''
-        self.loss_1 = self.re_mse+self.KL_divergence+self.mse2
+        self.loss = self.re_mse+self.KL_divergence+self.mse2
 
-        self.loss_2 = self.re_mse+self.KL_divergence
+    
 
         """ Summary """
         re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
         mse2_sum = tf.summary.scalar("mse2", self.mse2)
         kl_sum = tf.summary.scalar("kl", self.KL_divergence)
-        loss_sum = tf.summary.scalar("loss", self.loss_1)
+        loss_sum = tf.summary.scalar("loss", self.loss)
 
         # final summary operations
         self.merged_summary_op = tf.summary.merge_all()
@@ -331,10 +331,12 @@ class VAE(object):
                                           self.batch_size:(idx+1)*self.batch_size]
 
                 """ Training """
-                t_vars = tf.trainable_variables()
+                #t_vars = tf.trainable_variables()
                 with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+                    #self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                    #        .minimize(self.loss, var_list=t_vars)
                     self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                            .minimize(self.loss, var_list=t_vars)
+                            .minimize(self.loss)
             
 
                 # update autoencoder
