@@ -288,7 +288,9 @@ class VAE(object):
 
             input_data, table = shuffle_data(self.input_data, table)
             print(table.shape)
-            #c = input('break')
+            print(self.spk_count)
+            print(len(self.spk_count))
+            c = input('break')
             for idx in range(start_batch_id, self.num_batches):
 
                 batch_data = input_data[idx *
