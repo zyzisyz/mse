@@ -322,9 +322,9 @@ class VAE(object):
             table = self.update_table(mean)
 
             self.input_data, table = shuffle_data(self.input_data, table)
-            # get batch data
+            
             for idx in range(start_batch_id, self.num_batches):
-
+                # get batch data
                 batch_input_data = self.input_data[idx *
                                                    self.batch_size:(idx+1)*self.batch_size]
                 batch_input_table = table[idx *
@@ -333,21 +333,15 @@ class VAE(object):
                 """ Training """
                 t_vars = tf.trainable_variables()
                 with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                    if int(epoch) > self.mse2_start_e:
-                        self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                            .minimize(self.loss_1, var_list=t_vars)
-                    else:
-                        self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                            .minimize(self.loss_2, var_list=t_vars)
+                    self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                            .minimize(self.loss, var_list=t_vars)
+            
 
                 # update autoencoder
-                if int(epoch) > self.mse2_start_e:
-                    _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss_1, self.re_mse, self.KL_divergence, self.mse2],
+                
+                _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.re_mse, self.KL_divergence, self.mse2],
                                                                             feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
                 
-                else:
-                    _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss_2, self.re_mse, self.KL_divergence, self.mse2],
-                                                                            feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
