@@ -280,7 +280,7 @@ class VAE(object):
             mean = self.sess.run(self.mu, feed_dict={
                 self.inputs: self.input_data})
             table = self.update_table(mean)
-
+            print(mean.shape)
             input_data, table = shuffle_data(self.input_data, table)
 
             for idx in range(start_batch_id, self.num_batches):

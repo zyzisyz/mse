@@ -74,6 +74,10 @@ class VAE(object):
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
 
+        # load data
+        self.dataset_path = dataset_path
+        self.input_data, self.input_utt = loader(dataset_path)
+
         '''input_data | spk_list'''
         # vector 对应的说话人 int label
         self.spk_list = np.load(
@@ -120,7 +124,7 @@ class VAE(object):
         with tf.variable_scope("gaussian_MLP_encoder"):
 
             # initializers
-   
+
             w_init = tf.contrib.layers.variance_scaling_initializer()
             b_init = tf.constant_initializer(0.)
 
@@ -204,6 +208,8 @@ class VAE(object):
 
         self.inputs = tf.placeholder(
             tf.float32, [None, self.dnn_input_dim], name='input_vector')
+        self.inputs_table = tf.placeholder(
+            tf.float32, [None, self.z_dim], name='input_table')
 
         """ Loss Function """
 
@@ -229,8 +235,9 @@ class VAE(object):
 
         self.mse = 2*(1-self.b)*tf.reduce_mean(mse)
         self.KL_divergence = 2*self.b*tf.reduce_mean(KL_divergence)
+        self.mse2 =tf.losses.mean_squared_error(self.mu, self.inputs_table)
 
-        self.loss = self.mse + self.KL_divergence
+        self.loss = self.mse + self.KL_divergence + self.mse2
 
         """ Training """
         t_vars = tf.trainable_variables()
@@ -241,6 +248,7 @@ class VAE(object):
         """ Summary """
         mse = tf.summary.scalar("mse", self.mse)
         kl_sum = tf.summary.scalar("kl", self.KL_divergence)
+        mse = tf.summary.scalar("mse2", self.mse2)
         loss_sum = tf.summary.scalar("loss", self.loss)
 
         # final summary operations
@@ -278,24 +286,25 @@ class VAE(object):
                 self.inputs: self.input_data})
             table = self.update_table(mean)
 
-            input_data = shuffle_data(self.input_data, table)
-
+            input_data, table = shuffle_data(self.input_data, table)
+            print(table.shape)
+            #c = input('break')
             for idx in range(start_batch_id, self.num_batches):
 
-            
-                batch_images = input_data[idx *
-                                          self.batch_size:(idx+1)*self.batch_size]
-                
+                batch_data = input_data[idx *
+                                        self.batch_size:(idx+1)*self.batch_size]
+                batch_table = table[idx *
+                                    self.batch_size:(idx+1)*self.batch_size]
 
                 # update autoencoder
-                _, summary_str, loss, mse, kl_loss = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence],
-                                                                   feed_dict={self.inputs: batch_images})
+                _, summary_str, loss, mse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence, self.mse2],
+                                                                          feed_dict={self.inputs: batch_data, self.inputs_table: batch_table})
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
                 counter += 1
-                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, mse: %.8f, kl: %.8f, "
-                      % (epoch, idx, self.num_batches, loss, mse, kl_loss))
+                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, mse: %.8f, kl: %.8f, mse2: %.8f, "
+                      % (epoch, idx, self.num_batches, loss, mse, kl_loss, mse_2))
 
             # After an epoch, start_batch_id is set to zero
             # non-zero value is only for the first epoch after loading pre-trained model
@@ -303,7 +312,6 @@ class VAE(object):
 
             # save model
             self.save_ckp(self.checkpoint_dir, counter)
-
 
         # save model for final step
         self.save_ckp(self.checkpoint_dir, counter)
