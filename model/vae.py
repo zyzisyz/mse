@@ -11,8 +11,8 @@ from scipy import stats
 
 
 # 打乱数据集
+'''
 def Data_feed(dic, check, batch_size=500):
-
     index = [i for i in range(len(check))]
     random.shuffle(index)
     check = check[index]
@@ -42,7 +42,7 @@ def Data_feed(dic, check, batch_size=500):
                     embeddings.append(j)
     label = np.array(label).reshape(-1, 1)
     return embeddings, label
-
+'''
 
 def shuffle_set(data, label):
     index = [i for i in range(len(data))]
@@ -104,13 +104,15 @@ class VAE(object):
                  keep_prob=1,
                  beta1=0.5,
                  learning_rate=0.00005,
-                 b=0.04
+                 b=0.04,
+                 mse2_start_e=20
                  ):
 
         self.sess = sess
         self.b = b
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
+        self.mse2_start_e = mse2_start_e
 
         # load data
         self.dataset_path = dataset_path
@@ -122,6 +124,11 @@ class VAE(object):
             '/data/voxceleb_combined_200000/spk.npz')['spk']
         # 所有说话人 int label
         self.spker = np.load('/data/voxceleb_combined_200000/spk.npz')['check']
+
+        ''' 计算spker人数 '''
+        self.spk_count = [0 for _ in range(len(self.spker))]
+        for i in self.spker:
+            self.spk_count[int(i)] += 1
 
         self.epoch = epoch
         self.batch_size = batch_size
@@ -196,22 +203,41 @@ class VAE(object):
             y = tf.matmul(net, wo) + bo
         return y
 
-    def update_table(self, mean, spk):
-        num_spker = len(self.spker)
-        count = [0 for _ in range(num_spker)]
+    def update_table(self, mean):
+        '''
+        返回utt_table | 用于计算mse2
+        mse2 让相同spker的utt的mean尽可能的接近
+        '''
 
-        spk_z_table = []
-        for i in range(num_spker):
-            temp = self.zero
-            spk_z_dict.update(temp)
-        
+        mean = np.array(mean, dtype=np.float32)
+        num_spker = len(self.spker)  # 不同spker 人数
+        counter = np.array(self.spk_count, dtype=int)  # 存储每个spker的utt个数
 
-    def train(self):
+        '''初始化mean值矩阵为0'''
+        spk_table = np.zeros(shape=(num_spker, self.z_dim), dtype=np.float32)
+
+        '''加上mean值'''
+        for i in range(mean.shape[0]):
+            spk_table[spk_list[i]] += mean[i]
+
+        '''计算mean的平均值'''
+        spk_table = spk_table/counter
+
+        '''算mse2的utt table'''
+        utt_table = np.zeros(shape=mean.shape, dtype=np.float32)
+        for i in range(len(utt_table.shape[0])):
+            utt_table[i] += spk_table[spk_list[i]]
+
+        return utt_table
+
+    def build_model(self):
         #######################################################################
         '''网络结构'''
         #  输入inputs的feed
         self.inputs = tf.placeholder(
             tf.float32, [None, self.dnn_input_dim], name='input_vector')
+        self.mean_table = tf.placeholder(
+            tf.float32, [None, self.z_dim], name='mean_vector')
 
         # encoding
         self.mu, self.sigma = self.MPL_encoder(
@@ -225,6 +251,10 @@ class VAE(object):
         self.out = self.MLP_decoder(
             z, self.n_hidden, self.dnn_output_dim, self.keep_prob)
         #######################################################################
+
+    def train(self):
+
+        self.build_model()
 
         # initialize all variables
         tf.global_variables_initializer().run()
@@ -253,30 +283,41 @@ class VAE(object):
         for epoch in range(start_epoch, self.epoch):
             mean = self.sess.run(self.mu, feed_dict={
                                  self.inputs: self.input_data})
-            table = self.update_table(mean, check)
+            table = self.update_table(mean)
+
             self.input_data = shuffle_data(self.input_data)
 
             # get batch data
             for idx in range(start_batch_id, self.num_batches):
 
-                batch_images = self.input_data[idx *
-                                               self.batch_size:(idx+1)*self.batch_size]
-                # batch_z = gaussian(self.batch_size, self.z_dim)
+                batch_input_data = self.input_data[idx *
+                                                   self.batch_size:(idx+1)*self.batch_size]
+                batch_input_table = table[idx *
+                                          self.batch_size:(idx+1)*self.batch_size]
 
-                self.loss = self.mse + self.KL_divergence
-                # self.loss = self.KL_divergence
+                '''reconstruct mse'''
+                re_mse = tf.reduce_sum(tf.square(self.inputs-self.out), 1)
+                self.re_mse = 2*(1-self.b)*tf.reduce_mean(re_mse)
 
-                # KL散度
-                re_mse = 2*(1-self.b) * \
-                    tf.reduce_sum(tf.square(self.inputs-self.out), 1)
-                KL_divergence = self.b*0.5 * tf.reduce_sum(tf.square(self.mu) + tf.square(
+                '''KL散度'''
+                KL_divergence = tf.reduce_sum(tf.square(self.mu) + tf.square(
                     self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
+                self.KL_divergence = self.b*0.5*tf.reduce_mean(KL_divergence)
 
-                self.mse = tf.reduce_mean(re_mse)
-                self.KL_divergence = tf.reduce_mean(KL_divergence)
+                '''mse2'''
+                if epoch < self.mse2_start_e:
+                    self.mse2 = 0
+                else:
+                    mese2 = tf.reduce_sum(
+                        tf.square(self.mu-self.mean_table), 1)
+                    self.mse2 = tf.reduce_mean(mse2)
+
+                '''total loss'''
+                self.loss = self.re_mse+self.KL_divergence+self.mse2
 
                 """ Summary """
-                mse = tf.summary.scalar("mse", self.mse)
+                re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
+                mse2_sum = tf.summary.scalar("mse2", self.rmse2)
                 kl_sum = tf.summary.scalar("kl", self.KL_divergence)
                 loss_sum = tf.summary.scalar("loss", self.loss)
 
@@ -291,7 +332,7 @@ class VAE(object):
 
                 # update autoencoder
                 _, summary_str, loss, mse, kl_loss = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence],
-                                                                   feed_dict={self.inputs: batch_images})
+                                                                   feed_dict={self.inputs: batch_input_data, self.mean_table: batch_input_table})
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
