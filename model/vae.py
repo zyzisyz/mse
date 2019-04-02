@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 from __future__ import print_function
+
 import os
 import time
 import tensorflow as tf
 import numpy as np
+
 import random
+
 from model.model_utils import *
+
 from scipy import stats
-
-
-def shuffle_set(data, label):
-    index = [i for i in range(len(data))]
-    random.shuffle(index)
-    data = data[index]
-    label = label[index]
-    return data, label
 
 
 def shuffle_data(data, table):
@@ -27,10 +23,6 @@ def shuffle_data(data, table):
 
 
 def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, istrain=True):
-    '''
-    # 我自己封装的MPL单层函数
-    # 论文中的example是用单层的MPL，激活函数采用tanh，我不知道这里用其他是否有影响
-    '''
     w_init = tf.contrib.layers.variance_scaling_initializer()
     b_init = tf.constant_initializer(0.)
 
@@ -43,6 +35,8 @@ def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, i
 
     output = tf.matmul(input, w) + b
 
+    # 这个激活函数是我在网络上查的
+    # 注意这里的激活函数
     if acitvate == 'tanh':
         output = tf.nn.tanh(output)
     elif acitvate == 'sigmoid':
@@ -70,13 +64,13 @@ class VAE(object):
                  log_dir='./experiments/baseline/log',
                  keep_prob=1,
                  beta1=0.5,
-                 learning_rate=0.00005,
+                 learning_rate=0.0001,
                  b=0.04,
                  k=0.1
                  ):
         self.k = k
-        self.sess = sess
         self.b = b
+        self.sess = sess
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
 
@@ -97,7 +91,7 @@ class VAE(object):
         self.spk_count_shape = (spk_num, z_dim)
         '''
         spk_count = [0 for _ in range(len(self.spker))]
-        for i in self.spker:
+        for i in self.spk_list:
             spk_count[int(i)] += 1
 
         self.spk_count = []
@@ -130,7 +124,7 @@ class VAE(object):
         with tf.variable_scope("gaussian_MLP_encoder"):
 
             # initializers
-            # 这里是我瞎改的初始化值
+
             w_init = tf.contrib.layers.variance_scaling_initializer()
             b_init = tf.constant_initializer(0.)
 
@@ -142,35 +136,40 @@ class VAE(object):
                           keep_prob=keep_prob)
 
             wo = tf.get_variable(
-                'wo', [net.get_shape()[1], n_output], initializer=w_init)
-            bo = tf.get_variable('bo', [n_output], initializer=b_init)
+                'wo', [net.get_shape()[1], n_output * 2], initializer=w_init)
+            bo = tf.get_variable('bo', [n_output * 2], initializer=b_init)
 
             gaussian_params = tf.matmul(net, wo) + bo
-            mean = gaussian_params
 
-            stddev = tf.constant(
-                self.k, shape=[n_output], dtype=tf.float32)
-            stddev = self.sess.run(stddev)
+            mean = gaussian_params[:, :n_output]
+
+            stddev = 1e-6 + tf.nn.softplus(gaussian_params[:, n_output:])
 
         return mean, stddev
 
     # Bernoulli decoder
     def MLP_decoder(self, z, n_hidden, n_output, keep_prob):
         with tf.variable_scope("bernoulli_MLP_decoder"):
+
             # initializers
             w_init = tf.contrib.layers.variance_scaling_initializer()
             b_init = tf.constant_initializer(0.)
+
             # layer-0
             net = MLP_net(input=z, id=0, n_hidden=n_hidden, acitvate="tanh",
                           keep_prob=keep_prob)
+
             # layer-1
             net = MLP_net(input=net, id=3, n_hidden=n_hidden, acitvate='sigmoid',
                           keep_prob=keep_prob)
+
             # output layer-mean
             wo = tf.get_variable(
                 'wo', [net.get_shape()[1], n_output], initializer=w_init)
             bo = tf.get_variable('bo', [n_output], initializer=b_init)
+
             y = tf.matmul(net, wo) + bo
+
         return y
 
     def update_table(self, mean):
@@ -202,54 +201,58 @@ class VAE(object):
         return utt_table
 
     def build_model(self):
-        #######################################################################
-        '''网络结构'''
-        #  输入inputs的feed
+        # some parameters
+        """ Graph Input """
+
         self.inputs = tf.placeholder(
             tf.float32, [None, self.dnn_input_dim], name='input_vector')
-        self.mean_table = tf.placeholder(
-            tf.float32, [None, self.z_dim], name='mean_vector')
+        self.inputs_table = tf.placeholder(
+            tf.float32, [None, self.z_dim], name='input_table')
+
+        """ Loss Function """
 
         # encoding
         self.mu, self.sigma = self.MPL_encoder(
             self.inputs, self.n_hidden, self.z_dim, self.keep_prob)
 
-        # sampling by re-parameterization technique
+        # sampling by re-parameterization technique！
         z = self.mu + self.sigma * \
             tf.random_normal(tf.shape(self.mu), 0, 1, dtype=tf.float32)
 
         # decoding
         self.out = self.MLP_decoder(
             z, self.n_hidden, self.dnn_output_dim, self.keep_prob)
-        #######################################################################
 
-        '''reconstruct mse'''
-        re_mse = tf.reduce_sum(tf.square(self.inputs-self.out), 1)
-        self.re_mse = 2*(1-self.b)*tf.reduce_mean(re_mse)
+        '''loss'''
+        # MSE
+        mse = tf.reduce_sum(tf.square(self.inputs-self.out), [1])
 
-        '''KL散度'''
-        KL_divergence = tf.reduce_sum(tf.square(self.mu) + tf.square(
+        # KL
+        KL_divergence = 0.5 * tf.reduce_sum(tf.square(self.mu) + tf.square(
             self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
-        self.KL_divergence = self.b*0.5*tf.reduce_mean(KL_divergence)
 
-        # mse2 = tf.reduce_sum(
-        #    tf.square(self.mu-self.mean_table), 1)
-        self.mse2 = 0
+        self.mse = 2*(1-self.b)*tf.reduce_mean(mse)
+        self.KL_divergence = 2*self.b*tf.reduce_mean(KL_divergence)
+        self.mse2 = self.z_dim*tf.losses.mean_squared_error(self.mu, self.inputs_table)
 
-        '''total loss'''
-        self.loss = self.re_mse+self.KL_divergence+self.mse2
+        self.loss = self.mse + self.KL_divergence + self.mse2
+
+        """ Training """
+        t_vars = tf.trainable_variables()
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+            self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
+                .minimize(self.loss, var_list=t_vars)
 
         """ Summary """
-        re_mse_sum = tf.summary.scalar("re_mse", self.re_mse)
-        mse2_sum = tf.summary.scalar("mse2", self.mse2)
+        mse = tf.summary.scalar("mse", self.mse)
         kl_sum = tf.summary.scalar("kl", self.KL_divergence)
+        mse = tf.summary.scalar("mse2", self.mse2)
         loss_sum = tf.summary.scalar("loss", self.loss)
 
         # final summary operations
         self.merged_summary_op = tf.summary.merge_all()
 
     def train(self):
-
         self.build_model()
 
         # initialize all variables
@@ -280,34 +283,28 @@ class VAE(object):
             mean = self.sess.run(self.mu, feed_dict={
                 self.inputs: self.input_data})
             table = self.update_table(mean)
-            print(mean.shape)
+
             input_data, table = shuffle_data(self.input_data, table)
-
+            # print(table.shape)
+            # print(self.spk_count)
+            # print(len(self.spk_count))
+            # c = input('break')
             for idx in range(start_batch_id, self.num_batches):
-                # get batch data
-                batch_input_data = input_data[idx *
-                                              self.batch_size:(idx+1)*self.batch_size]
-                batch_input_table = table[idx *
-                                          self.batch_size:(idx+1)*self.batch_size]
 
-                """ Training """
-                # t_vars = tf.trainable_variables()
-                # with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                # self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                #        .minimize(self.loss, var_list=t_vars)
-                self.optim = tf.train.AdamOptimizer(self.learning_rate, beta1=self.beta1) \
-                    .minimize(self.loss)
+                batch_data = input_data[idx *
+                                        self.batch_size:(idx+1)*self.batch_size]
+                batch_table = table[idx *
+                                    self.batch_size:(idx+1)*self.batch_size]
 
                 # update autoencoder
-                _, summary_str, loss, remse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.re_mse, self.KL_divergence, self.mse2],
-                                                                            feed_dict={self.inputs: batch_input_data})
-
+                _, summary_str, loss, mse, kl_loss, mse_2 = self.sess.run([self.optim, self.merged_summary_op, self.loss, self.mse, self.KL_divergence, self.mse2],
+                                                                          feed_dict={self.inputs: batch_data, self.inputs_table: batch_table})
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
                 counter += 1
-                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, re_mse: %.8f, kl: %.8f, mse2: %.8f,"
-                      % (epoch, idx, self.num_batches, loss, remse, kl_loss, mse_2))
+                print("Epoch: [%2d] [%4d/%4d] loss: %.8f, mse: %.8f, kl: %.8f, mse2: %.8f, "
+                      % (epoch, idx, self.num_batches, loss, mse, kl_loss, mse_2))
 
             # After an epoch, start_batch_id is set to zero
             # non-zero value is only for the first epoch after loading pre-trained model
@@ -331,15 +328,14 @@ class VAE(object):
             self.log_dir + '/' + self.model_name, self.sess.graph)
 
         # restore check-point if it exits
-
         could_load, checkpoint_counter = self.load_ckp(self.checkpoint_dir)
         if could_load:
             print(" [*] Load SUCCESS")
         else:
             print(" [!] Load failed...")
 
-        predict_mu, predict_sigma = self.sess.run([self.mu, self.sigma],
-                                                  feed_dict={self.inputs: input_vector})
+        predict_mu = self.sess.run(
+            self.mu, feed_dict={self.inputs: input_vector})
 
         return predict_mu
 

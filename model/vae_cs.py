@@ -66,7 +66,7 @@ class VAE(object):
                  beta1=0.5,
                  learning_rate=0.0001,
                  b=0.04,
-                 k=1.0
+                 k=0.1
                  ):
         self.k = k
         self.b = b
@@ -91,7 +91,7 @@ class VAE(object):
         self.spk_count_shape = (spk_num, z_dim)
         '''
         spk_count = [0 for _ in range(len(self.spker))]
-        for i in self.spker:
+        for i in self.spk_list:
             spk_count[int(i)] += 1
 
         self.spk_count = []
@@ -235,7 +235,7 @@ class VAE(object):
 
         self.mse = 2*(1-self.b)*tf.reduce_mean(mse)
         self.KL_divergence = 2*self.b*tf.reduce_mean(KL_divergence)
-        self.mse2 =tf.losses.mean_squared_error(self.mu, self.inputs_table)
+        self.mse2 = self.z_dim*tf.losses.mean_squared_error(self.mu, self.inputs_table)
 
         self.loss = self.mse + self.KL_divergence + self.mse2
 
@@ -287,10 +287,10 @@ class VAE(object):
             table = self.update_table(mean)
 
             input_data, table = shuffle_data(self.input_data, table)
-            print(table.shape)
-            print(self.spk_count)
-            print(len(self.spk_count))
-            c = input('break')
+            # print(table.shape)
+            # print(self.spk_count)
+            # print(len(self.spk_count))
+            # c = input('break')
             for idx in range(start_batch_id, self.num_batches):
 
                 batch_data = input_data[idx *
