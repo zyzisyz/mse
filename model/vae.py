@@ -70,6 +70,8 @@ class VAE(object):
                  ):
         self.k = k
         self.b = b
+        print(self.b)
+        c = input('break')
         self.sess = sess
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
@@ -132,7 +134,10 @@ class VAE(object):
             net = MLP_net(input=x, id=0, n_hidden=n_hidden, acitvate='sigmoid',
                           keep_prob=keep_prob)
             # layer-1
-            net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='tanh',
+            net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='relu',
+                          keep_prob=keep_prob)
+                          
+            net = MLP_net(input=net, id=2, n_hidden=n_hidden, acitvate='tanh',
                           keep_prob=keep_prob)
 
             wo = tf.get_variable(
@@ -159,8 +164,11 @@ class VAE(object):
             net = MLP_net(input=z, id=0, n_hidden=n_hidden, acitvate="tanh",
                           keep_prob=keep_prob)
 
+            net = MLP_net(input=z, id=1, n_hidden=n_hidden, acitvate="relu",
+                          keep_prob=keep_prob)
+
             # layer-1
-            net = MLP_net(input=net, id=3, n_hidden=n_hidden, acitvate='sigmoid',
+            net = MLP_net(input=net, id=2, n_hidden=n_hidden, acitvate='sigmoid',
                           keep_prob=keep_prob)
 
             # output layer-mean
@@ -225,15 +233,17 @@ class VAE(object):
 
         '''loss'''
         # MSE
-        mse = tf.reduce_sum(tf.square(self.inputs-self.out), [1])
+        mse = tf.reduce_sum(tf.square(self.inputs-self.out), 1)
 
         # KL
         KL_divergence = 0.5 * tf.reduce_sum(tf.square(self.mu) + tf.square(
-            self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, [1])
+            self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, 1)
 
         self.mse = 2*(1-self.b)*tf.reduce_mean(mse)
+
         self.KL_divergence = 2*self.b*tf.reduce_mean(KL_divergence)
-        self.mse2 = self.z_dim*tf.losses.mean_squared_error(self.mu, self.inputs_table)
+        self.mse2 = self.z_dim * \
+            tf.losses.mean_squared_error(self.mu, self.inputs_table)
 
         self.loss = self.mse + self.KL_divergence + self.mse2
 

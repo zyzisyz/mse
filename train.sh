@@ -5,4 +5,5 @@ python -u main.py   --epoch 20 \
                     --learn_rate 0.000005 \
                     --beta1 0.5 \
                     --dataset_path ./data/voxceleb_combined_200000/xvector.npz \
-                    --z_dim 200 
+                    --z_dim 200 \
+                    --b 0.5
