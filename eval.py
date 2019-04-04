@@ -4,6 +4,7 @@ from model.model_utils import *
 import tensorflow as tf
 import os
 
+
 tf.app.flags.DEFINE_integer('epoch', 20, 'epoch num')
 
 tf.app.flags.DEFINE_integer('batch_size', 64, 'batch size')
@@ -28,8 +29,9 @@ tf.app.flags.DEFINE_string('dataset_path', './data/d.npz',
 # store flag
 params = tf.app.flags.FLAGS
 
-
-experiment_dir = '/experiments/'+'z'+str(params.z_dim)+'_h' + str(params.n_hidden)+'_a'+str(params.a)+'_b'+str(params.b)
+experiment_dir = '/experiments/'+'z' + \
+    str(params.z_dim)+'_h' + str(params.n_hidden) + \
+    '_a'+str(params.a)+'_b'+str(params.b)
 
 experiment_dir = os.path.dirname(os.path.abspath(__file__))+experiment_dir
 
@@ -37,6 +39,8 @@ checkpoint_dir = experiment_dir+'/checkpoint'
 
 log_dir = experiment_dir+'/train_log'
 
+all_ckpt_path = tf.train.get_checkpoint_state(
+    checkpoint_dir).all_model_checkpoint_paths
 
 print('model/checkpoint/logs will save in {}.'.format(experiment_dir))
 
@@ -55,19 +59,16 @@ with tf.Session() as sess:
         b=params.b,
         a=params.a
     )
-    test.build_model()
     print('model/checkpoint/logs will save in {}.'.format(experiment_dir))
 
-    test.train()
-    print('model / checkpoint / logs will save in {}.'.format(experiment_dir))
-
-'''
     paths = ["./data/voxceleb_combined_200000/xvector",
              "./data/sitw_dev/enroll/xvector",
              "./data/sitw_dev/test/xvector",
              "./data/sitw_eval/enroll/xvector",
              "./data/sitw_eval/test/xvector"
              ]
+    print(len(all_ckpt_path))
+    n = input('n = ')
 
     for path in paths:
         if os.path.exists(path+'.ark') == True:
@@ -76,7 +77,8 @@ with tf.Session() as sess:
 
     for path in paths:
         vector, labels = loader(path+'.npz')
-        predict_mu = test.predict(vector)
+        test.build_model()
+        predict_mu = test.eval(vector, n)
         print(path)
         print(predict_mu.shape)
         get_skew_and_kurt(predict_mu)
@@ -93,4 +95,3 @@ with tf.Session() as sess:
 
     print('\nall done!')
     print('model/checkpoint/logs will save in {}.'.format(experiment_dir))
-'''

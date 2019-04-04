@@ -23,6 +23,7 @@ def shuffle_data(data, table):
 
 
 def MLP_net(input, id, n_hidden, acitvate="elu", keep_prob=1, init_stddev=0.2, istrain=True):
+
     w_init = tf.contrib.layers.variance_scaling_initializer()
     b_init = tf.constant_initializer(0.)
 
@@ -71,7 +72,6 @@ class VAE(object):
 
         self.b = b
         self.a = a
-
 
         self.sess = sess
         self.checkpoint_dir = checkpoint_dir
@@ -199,7 +199,6 @@ class VAE(object):
             spk_table[self.spk_list[i]] += mean[i]
 
         '''计算mean的平均值'''
-
         spk_table = spk_table/counter
 
         '''算mse2的utt table'''
@@ -264,14 +263,12 @@ class VAE(object):
         # final summary operations
         self.merged_summary_op = tf.summary.merge_all()
 
+        self.saver = tf.train.Saver(max_to_keep=1000)
+
     def train(self):
-        self.build_model()
 
         # initialize all variables
         tf.global_variables_initializer().run()
-
-        # saver to save model
-        self.saver = tf.train.Saver(max_to_keep=1000)
 
         # summary writer
         self.writer = tf.summary.FileWriter(
@@ -324,10 +321,10 @@ class VAE(object):
             start_batch_id = 0
 
             # save model
-            if epoch % 10 == 0:
-                self.save_ckp(self.checkpoint_dir, epoch)
-            if epoch == 5:
-                self.save_ckp(self.checkpoint_dir, epoch)
+            if (epoch+1) % 20 == 0:
+                self.save_ckp(self.checkpoint_dir, counter)
+            if (epoch+1) == 10:
+                self.save_ckp(self.checkpoint_dir, counter)
 
         # save model for final step
         self.save_ckp(self.checkpoint_dir, counter)
@@ -366,8 +363,8 @@ class VAE(object):
     def load_ckp(self, checkpoint_dir):
         import re
         print(" [*] Reading checkpoints...")
-
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
             self.saver.restore(self.sess, os.path.join(
@@ -379,3 +376,20 @@ class VAE(object):
         else:
             print(" [*] Failed to find a checkpoint")
             return False, 0
+
+    def all_cpk_paths(self):
+        ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
+        return ckpt.all_model_checkpoint_paths
+
+    def eval(self, input_vector, n):
+
+        all_ckp_paths = self.all_cpk_paths()
+
+        cpk_path = all_ckp_paths[int(n)]
+        self.saver.restore(self.sess, os.path.join(
+            self.checkpoint_dir, cpk_path))
+
+        predict_mu = self.sess.run(
+            self.mu, feed_dict={self.inputs: input_vector})
+
+        return predict_mu
