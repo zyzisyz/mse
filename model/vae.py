@@ -66,12 +66,13 @@ class VAE(object):
                  beta1=0.5,
                  learning_rate=0.0001,
                  b=0.04,
-                 k=0.1
+                 a=15
                  ):
-        self.k = k
+
         self.b = b
-        print(self.b)
-        c = input('break')
+        self.a = a
+
+
         self.sess = sess
         self.checkpoint_dir = checkpoint_dir
         self.log_dir = log_dir
@@ -131,12 +132,12 @@ class VAE(object):
             b_init = tf.constant_initializer(0.)
 
             # layer-0
-            net = MLP_net(input=x, id=0, n_hidden=n_hidden, acitvate='sigmoid',
+            net = MLP_net(input=x, id=0, n_hidden=n_hidden, acitvate='elu',
                           keep_prob=keep_prob)
             # layer-1
-            net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='relu',
+            net = MLP_net(input=net, id=1, n_hidden=n_hidden, acitvate='elu',
                           keep_prob=keep_prob)
-                          
+
             net = MLP_net(input=net, id=2, n_hidden=n_hidden, acitvate='tanh',
                           keep_prob=keep_prob)
 
@@ -164,11 +165,11 @@ class VAE(object):
             net = MLP_net(input=z, id=0, n_hidden=n_hidden, acitvate="tanh",
                           keep_prob=keep_prob)
 
-            net = MLP_net(input=z, id=1, n_hidden=n_hidden, acitvate="relu",
+            net = MLP_net(input=z, id=1, n_hidden=n_hidden, acitvate="elu",
                           keep_prob=keep_prob)
 
             # layer-1
-            net = MLP_net(input=net, id=2, n_hidden=n_hidden, acitvate='sigmoid',
+            net = MLP_net(input=net, id=2, n_hidden=n_hidden, acitvate='elu',
                           keep_prob=keep_prob)
 
             # output layer-mean
@@ -239,10 +240,11 @@ class VAE(object):
         KL_divergence = 0.5 * tf.reduce_sum(tf.square(self.mu) + tf.square(
             self.sigma) - tf.log(1e-8 + tf.square(self.sigma)) - 1, 1)
 
-        self.mse = 2*(1-self.b)*tf.reduce_mean(mse)
+        self.mse = tf.reduce_mean(mse)
 
-        self.KL_divergence = 2*self.b*tf.reduce_mean(KL_divergence)
-        self.mse2 = self.z_dim * \
+        self.KL_divergence = self.b*tf.reduce_mean(KL_divergence)
+
+        self.mse2 = self.a * \
             tf.losses.mean_squared_error(self.mu, self.inputs_table)
 
         self.loss = self.mse + self.KL_divergence + self.mse2
@@ -269,7 +271,7 @@ class VAE(object):
         tf.global_variables_initializer().run()
 
         # saver to save model
-        self.saver = tf.train.Saver()
+        self.saver = tf.train.Saver(max_to_keep=1000)
 
         # summary writer
         self.writer = tf.summary.FileWriter(
@@ -277,6 +279,7 @@ class VAE(object):
 
         # restore check-point if it exits
         could_load, checkpoint_counter = self.load_ckp(self.checkpoint_dir)
+
         if could_load:
             start_epoch = (int)(checkpoint_counter / self.num_batches)
             start_batch_id = checkpoint_counter - start_epoch * self.num_batches
@@ -321,7 +324,10 @@ class VAE(object):
             start_batch_id = 0
 
             # save model
-            self.save_ckp(self.checkpoint_dir, counter)
+            if epoch % 10 == 0:
+                self.save_ckp(self.checkpoint_dir, epoch)
+            if epoch == 5:
+                self.save_ckp(self.checkpoint_dir, epoch)
 
         # save model for final step
         self.save_ckp(self.checkpoint_dir, counter)
@@ -349,18 +355,7 @@ class VAE(object):
 
         return predict_mu
 
-    def visualize_results(self, epoch):
-        pass
-
-    @property
-    def model_dir(self):
-        return "{}_{}_{}_{}".format(
-            self.model_name, self.dataset_path,
-            self.batch_size, self.z_dim)
-
     def save_ckp(self, checkpoint_dir, step):
-        checkpoint_dir = os.path.join(
-            checkpoint_dir, self.model_dir, self.model_name)
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
@@ -371,8 +366,6 @@ class VAE(object):
     def load_ckp(self, checkpoint_dir):
         import re
         print(" [*] Reading checkpoints...")
-        checkpoint_dir = os.path.join(
-            checkpoint_dir, self.model_dir, self.model_name)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:

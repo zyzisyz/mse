@@ -34,6 +34,7 @@ experiment_dir = '/experiments/'+'z'+str(params.z_dim)+'_h' + str(params.n_hidde
 experiment_dir = os.path.dirname(os.path.abspath(__file__))+experiment_dir
 
 checkpoint_dir = experiment_dir+'/checkpoint'
+
 log_dir = experiment_dir+'/train_log'
 
 
