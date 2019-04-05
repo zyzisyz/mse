@@ -26,6 +26,8 @@ tf.app.flags.DEFINE_float('a', 1., 'a')
 tf.app.flags.DEFINE_string('dataset_path', './data/d.npz',
                            'd/x vector data path')
 
+tf.app.flags.DEFINE_integer('n', 0, 'number of model')
+
 # store flag
 params = tf.app.flags.FLAGS
 
@@ -59,6 +61,7 @@ with tf.Session() as sess:
         b=params.b,
         a=params.a
     )
+    test.build_model()
     print('model/checkpoint/logs will save in {}.'.format(experiment_dir))
 
     paths = ["./data/voxceleb_combined_200000/xvector",
@@ -67,8 +70,8 @@ with tf.Session() as sess:
              "./data/sitw_eval/enroll/xvector",
              "./data/sitw_eval/test/xvector"
              ]
-    print(len(all_ckpt_path))
-    n = input('n = ')
+
+    n = params.n
 
     for path in paths:
         if os.path.exists(path+'.ark') == True:
@@ -77,7 +80,6 @@ with tf.Session() as sess:
 
     for path in paths:
         vector, labels = loader(path+'.npz')
-        test.build_model()
         predict_mu = test.eval(vector, n)
         print(path)
         print(predict_mu.shape)
